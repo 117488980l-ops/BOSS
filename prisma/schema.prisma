@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  DRAFT
+  PROMPT_READY
+  CRITERIA_CONFIRMED
+  CRITERIA_LOCKED
+  ARCHIVED
+}
+
+enum PromptBundleStatus {
+  DRAFT
+  LOCKED
+}
+
+enum CriteriaStatus {
+  DRAFT
+  CONFIRMED
+  LOCKED
+}
+
+enum ResumeStatus {
+  UPLOADED
+  PARSED
+  PARSE_FAILED
+}
+
+enum AnalysisStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model Job {
+  id              String               @id @default(cuid())
+  title           String
+  department      String?
+  internalJd      String               @db.Text
+  externalJd      String               @db.Text
+  requiredSkills  String[]             @default([])
+  preferredSkills String[]             @default([])
+  status          JobStatus            @default(DRAFT)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  ragLogs         RagRetrievalLog[]
+  promptBundles   PromptBundle[]
+  criteria        JobCriteriaVersion[]
+  analysisReports AnalysisReport[]
+}
+
+model RagRetrievalLog {
+  id        String   @id @default(cuid())
+  jobId     String
+  provider  String
+  query     String   @db.Text
+  chunks    Json
+  snapshot  Json
+  createdAt DateTime @default(now())
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
+
+model PromptBundle {
+  id                            String               @id @default(cuid())
+  jobId                         String
+  status                        PromptBundleStatus   @default(DRAFT)
+  ragSnapshot                   Json
+  jobStandardPrompt             String               @db.Text
+  resumeScreeningPromptTemplate String               @db.Text
+  finalResumeScreeningPrompt    String?              @db.Text
+  generatedCriteria             Json?
+  createdAt                     DateTime             @default(now())
+  lockedAt                      DateTime?
+  job                           Job                  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  criteriaVersions              JobCriteriaVersion[]
+  analysisReports               AnalysisReport[]
+
+  @@index([jobId])
+}
+
+model JobCriteriaVersion {
+  id             String          @id @default(cuid())
+  jobId          String
+  promptBundleId String?
+  version        Int
+  status         CriteriaStatus  @default(DRAFT)
+  criteria       Json
+  createdBy      String?
+  createdAt      DateTime        @default(now())
+  confirmedAt    DateTime?
+  lockedAt       DateTime?
+  job            Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  promptBundle   PromptBundle?   @relation(fields: [promptBundleId], references: [id])
+  reports        AnalysisReport[]
+
+  @@unique([jobId, version])
+  @@index([jobId, status])
+}
+
+model Resume {
+  id           String       @id @default(cuid())
+  originalName String
+  mimeType     String
+  storagePath  String
+  parsedText   String?      @db.Text
+  status       ResumeStatus @default(UPLOADED)
+  uploadedAt   DateTime     @default(now())
+  candidates   Candidate[]
+}
+
+model Candidate {
+  id        String           @id @default(cuid())
+  resumeId  String
+  name      String?
+  email     String?
+  phone     String?
+  createdAt DateTime         @default(now())
+  resume    Resume           @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  reports   AnalysisReport[]
+
+  @@index([resumeId])
+}
+
+model AnalysisReport {
+  id                String              @id @default(cuid())
+  jobId             String
+  candidateId       String
+  criteriaVersionId String
+  promptBundleId    String
+  status            AnalysisStatus      @default(PENDING)
+  report            Json
+  createdAt         DateTime            @default(now())
+  completedAt       DateTime?
+  job               Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidate         Candidate           @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  criteriaVersion   JobCriteriaVersion  @relation(fields: [criteriaVersionId], references: [id])
+  promptBundle      PromptBundle        @relation(fields: [promptBundleId], references: [id])
+  evidence          AnalysisEvidence[]
+
+  @@index([jobId, candidateId])
+  @@index([criteriaVersionId])
+}
+
+model AnalysisEvidence {
+  id          String         @id @default(cuid())
+  reportId    String
+  criterionId String?
+  sourceText  String         @db.Text
+  rationale   String?        @db.Text
+  weight      Int            @default(1)
+  report      AnalysisReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+}
